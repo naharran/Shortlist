@@ -43,6 +43,26 @@ class ApplicationController extends Controller
         return response()->json($application);
     }
 
+    public function review(Request $request, Application $application): JsonResponse
+    {
+        if ($application->status !== 'pending') {
+            return response()->json(['message' => 'Application already reviewed.'], 422);
+        }
+
+        $validated = $request->validate([
+            'status'      => ['required', Rule::in(['shortlisted', 'rejected'])],
+            'review_note' => ['nullable', 'string'],
+        ]);
+
+        $application->update([
+            'status'      => $validated['status'],
+            'review_note' => $validated['review_note'] ?? null,
+            'reviewed_at' => now(),
+        ]);
+
+        return response()->json($application);
+    }
+
     public function store(Request $request, HeuristicService $heuristicService): JsonResponse
     {
         $validated = $request->validate([

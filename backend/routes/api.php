@@ -7,4 +7,5 @@ use Illuminate\Support\Facades\Route;
 Route::get('/skills', [SkillController::class, 'index']);
 Route::get('/applications', [ApplicationController::class, 'index']);
 Route::get('/applications/{application}', [ApplicationController::class, 'show']);
+Route::patch('/applications/{application}/review', [ApplicationController::class, 'review']);
 Route::post('/applications', [ApplicationController::class, 'store']);
