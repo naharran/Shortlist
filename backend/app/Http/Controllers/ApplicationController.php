@@ -11,6 +11,38 @@ use Illuminate\Validation\Rule;
 
 class ApplicationController extends Controller
 {
+    public function index(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'status' => ['sometimes', Rule::in(['pending', 'shortlisted', 'rejected'])],
+        ]);
+
+        $query = Application::query()
+            ->select([
+                'id',
+                'name',
+                'email',
+                'position',
+                'overall_experience',
+                'status',
+                'risk_score',
+                'heuristic_flags',
+                'created_at',
+            ])
+            ->orderByDesc('created_at');
+
+        if (isset($validated['status'])) {
+            $query->where('status', $validated['status']);
+        }
+
+        return response()->json($query->get());
+    }
+
+    public function show(Application $application): JsonResponse
+    {
+        return response()->json($application);
+    }
+
     public function store(Request $request, HeuristicService $heuristicService): JsonResponse
     {
         $validated = $request->validate([
