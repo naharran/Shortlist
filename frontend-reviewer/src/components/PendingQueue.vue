@@ -5,6 +5,9 @@ import type { Application, ApplicationSummary, Skill } from '@shared/types'
 
 const apiUrl = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 
+type TabStatus = 'pending' | 'shortlisted' | 'rejected'
+
+const activeTab = ref<TabStatus>('pending')
 const applications = ref<ApplicationSummary[]>([])
 const skills = ref<Skill[]>([])
 const loading = ref(true)
@@ -12,6 +15,9 @@ const errorMessage = ref<string | null>(null)
 
 const drawerOpen = ref(false)
 const detailLoading = ref(false)
+const reviewing = ref(false)
+const reviewNote = ref('')
+const reviewError = ref<string | null>(null)
 const selectedApplication = ref<Application | null>(null)
 
 const columns = [
@@ -53,6 +59,8 @@ function skillNames(ids: number[]): string {
 async function openDetail(id: number) {
   drawerOpen.value = true
   detailLoading.value = true
+  reviewNote.value = ''
+  reviewError.value = null
   selectedApplication.value = null
 
   try {
@@ -67,18 +75,81 @@ async function openDetail(id: number) {
   }
 }
 
+async function submitReview(status: 'shortlisted' | 'rejected') {
+  if (!selectedApplication.value) return
+
+  reviewing.value = true
+  reviewError.value = null
+
+  try {
+    const response = await fetch(
+      `${apiUrl}/api/applications/${selectedApplication.value.id}/review`,
+      {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify({
+          status,
+          review_note: reviewNote.value || null,
+        }),
+      },
+    )
+
+    if (!response.ok) {
+      const data = await response.json()
+      reviewError.value = data.message ?? 'Review failed. Please try again.'
+      return
+    }
+
+    applications.value = applications.value.filter(
+      (app) => app.id !== selectedApplication.value!.id,
+    )
+    drawerOpen.value = false
+    selectedApplication.value = null
+    reviewNote.value = ''
+  } catch {
+    reviewError.value = 'Network error. Please try again.'
+  } finally {
+    reviewing.value = false
+  }
+}
+
+const emptyMessages: Record<TabStatus, string> = {
+  pending: 'No pending applications.',
+  shortlisted: 'No shortlisted applications.',
+  rejected: 'No rejected applications.',
+}
+
+async function loadApplications(status: TabStatus) {
+  loading.value = true
+  errorMessage.value = null
+
+  try {
+    const response = await fetch(`${apiUrl}/api/applications?status=${status}`)
+    if (!response.ok) throw new Error('Failed to load applications')
+    applications.value = await response.json()
+  } catch {
+    errorMessage.value = `Could not load ${status} applications.`
+  } finally {
+    loading.value = false
+  }
+}
+
+async function switchTab(tab: TabStatus) {
+  activeTab.value = tab
+  await loadApplications(tab)
+}
+
 onMounted(async () => {
   try {
-    const [appsRes, skillsRes] = await Promise.all([
-      fetch(`${apiUrl}/api/applications?status=pending`),
-      fetch(`${apiUrl}/api/skills`),
-    ])
-    if (!appsRes.ok || !skillsRes.ok) throw new Error('Failed to load data')
-    applications.value = await appsRes.json()
+    const skillsRes = await fetch(`${apiUrl}/api/skills`)
+    if (!skillsRes.ok) throw new Error('Failed to load skills')
     skills.value = await skillsRes.json()
+    await loadApplications('pending')
   } catch {
-    errorMessage.value = 'Could not load pending applications.'
-  } finally {
+    errorMessage.value = 'Could not load applications.'
     loading.value = false
   }
 })
@@ -86,8 +157,14 @@ onMounted(async () => {
 
 <template>
   <div class="page">
-    <n-card title="Pending Applications">
-      <n-alert v-if="errorMessage" type="error" :title="errorMessage" style="margin-bottom: 16px" />
+    <n-card title="Applications">
+      <n-tabs :value="activeTab" @update:value="(tab: TabStatus) => switchTab(tab)">
+        <n-tab-pane name="pending" tab="Pending" />
+        <n-tab-pane name="shortlisted" tab="Shortlisted" />
+        <n-tab-pane name="rejected" tab="Rejected" />
+      </n-tabs>
+
+      <n-alert v-if="errorMessage" type="error" :title="errorMessage" style="margin: 16px 0" />
 
       <n-spin :show="loading">
         <n-data-table
@@ -101,7 +178,7 @@ onMounted(async () => {
           })"
         />
         <p v-if="!loading && !errorMessage && applications.length === 0" class="empty">
-          No pending applications.
+          {{ emptyMessages[activeTab] }}
         </p>
       </n-spin>
     </n-card>
@@ -142,6 +219,32 @@ onMounted(async () => {
 
             <h3 class="section-title">Cover Letter</h3>
             <p class="cover-letter">{{ selectedApplication.cover_letter }}</p>
+
+            <template v-if="selectedApplication.status === 'pending'">
+              <h3 class="section-title">Review Note (optional)</h3>
+              <n-input
+                v-model:value="reviewNote"
+                type="textarea"
+                placeholder="Add a note about your decision..."
+                :rows="3"
+              />
+
+              <n-alert v-if="reviewError" type="error" :title="reviewError" style="margin-top: 16px" />
+
+              <n-space style="margin-top: 16px">
+                <n-button type="success" :loading="reviewing" @click="submitReview('shortlisted')">
+                  Shortlist
+                </n-button>
+                <n-button type="error" :loading="reviewing" @click="submitReview('rejected')">
+                  Reject
+                </n-button>
+              </n-space>
+            </template>
+
+            <template v-else-if="selectedApplication.review_note">
+              <h3 class="section-title">Review Note</h3>
+              <p class="cover-letter">{{ selectedApplication.review_note }}</p>
+            </template>
           </template>
         </n-spin>
       </n-drawer-content>
