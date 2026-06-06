@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import HelloWorld from './components/HelloWorld.vue'
+import PendingQueue from './components/PendingQueue.vue'
 </script>
 
 <template>
-  <HelloWorld />
+  <PendingQueue />
 </template>
