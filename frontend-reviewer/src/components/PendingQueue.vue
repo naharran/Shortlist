@@ -3,6 +3,7 @@ import { h, ref, watch } from 'vue'
 import { NTag } from 'naive-ui'
 import { useAuth0 } from '@auth0/auth0-vue'
 import type { Application, ApplicationSummary, Skill } from '@shared/types'
+import ApplicationDrawer from './ApplicationDrawer.vue'
 
 const apiUrl = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 const { getAccessTokenSilently, isAuthenticated, isLoading: authLoading } = useAuth0()
@@ -68,13 +69,6 @@ const columns = [
     render: (row: ApplicationSummary) => new Date(row.created_at).toLocaleString(),
   },
 ]
-
-function skillNames(ids: number[]): string {
-  if (ids.length === 0) return '—'
-  return ids
-    .map((id) => skills.value.find((s) => s.id === id)?.name ?? `Skill #${id}`)
-    .join(', ')
-}
 
 async function openDetail(id: number) {
   drawerOpen.value = true
@@ -211,72 +205,16 @@ watch(
       </n-spin>
     </n-card>
 
-    <n-drawer v-model:show="drawerOpen" :width="560" placement="right">
-      <n-drawer-content :title="selectedApplication?.name ?? 'Application Details'">
-        <n-spin :show="detailLoading">
-          <template v-if="selectedApplication">
-            <n-descriptions :column="1" label-placement="left" bordered>
-              <n-descriptions-item label="Email">{{ selectedApplication.email }}</n-descriptions-item>
-              <n-descriptions-item label="Phone">{{ selectedApplication.phone_number }}</n-descriptions-item>
-              <n-descriptions-item label="Position">{{ selectedApplication.position }}</n-descriptions-item>
-              <n-descriptions-item label="Experience">
-                {{ selectedApplication.overall_experience }} years
-              </n-descriptions-item>
-              <n-descriptions-item label="Risk Score">
-                <n-tag
-                  :type="selectedApplication.risk_score >= 50 ? 'error' : selectedApplication.risk_score >= 25 ? 'warning' : 'success'"
-                >
-                  {{ selectedApplication.risk_score }}
-                </n-tag>
-              </n-descriptions-item>
-              <n-descriptions-item label="Top Skills">
-                {{ skillNames(selectedApplication.top_skills) }}
-              </n-descriptions-item>
-              <n-descriptions-item label="Moderate Skills">
-                {{ skillNames(selectedApplication.moderate_skills) }}
-              </n-descriptions-item>
-            </n-descriptions>
-
-            <h3 class="section-title">Flags</h3>
-            <n-space v-if="selectedApplication.heuristic_flags.length > 0">
-              <n-tag v-for="(flag, i) in selectedApplication.heuristic_flags" :key="i" type="warning">
-                {{ flag.key }}
-              </n-tag>
-            </n-space>
-            <p v-else class="muted">No flags.</p>
-
-            <h3 class="section-title">Cover Letter</h3>
-            <p class="cover-letter">{{ selectedApplication.cover_letter }}</p>
-
-            <template v-if="selectedApplication.status === 'pending'">
-              <h3 class="section-title">Review Note (optional)</h3>
-              <n-input
-                v-model:value="reviewNote"
-                type="textarea"
-                placeholder="Add a note about your decision..."
-                :rows="3"
-              />
-
-              <n-alert v-if="reviewError" type="error" :title="reviewError" style="margin-top: 16px" />
-
-              <n-space style="margin-top: 16px">
-                <n-button type="success" :loading="reviewing" @click="submitReview('shortlisted')">
-                  Shortlist
-                </n-button>
-                <n-button type="error" :loading="reviewing" @click="submitReview('rejected')">
-                  Reject
-                </n-button>
-              </n-space>
-            </template>
-
-            <template v-else-if="selectedApplication.review_note">
-              <h3 class="section-title">Review Note</h3>
-              <p class="cover-letter">{{ selectedApplication.review_note }}</p>
-            </template>
-          </template>
-        </n-spin>
-      </n-drawer-content>
-    </n-drawer>
+    <ApplicationDrawer
+      v-model:show="drawerOpen"
+      v-model:review-note="reviewNote"
+      :detail-loading="detailLoading"
+      :selected-application="selectedApplication"
+      :skills="skills"
+      :review-error="reviewError"
+      :reviewing="reviewing"
+      @submit-review="submitReview"
+    />
   </div>
 </template>
 
@@ -291,22 +229,5 @@ watch(
   text-align: center;
   color: #666;
   margin-top: 24px;
-}
-
-.section-title {
-  margin: 24px 0 8px;
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.cover-letter {
-  white-space: pre-wrap;
-  line-height: 1.5;
-  margin: 0;
-}
-
-.muted {
-  color: #666;
-  margin: 0;
 }
 </style>
