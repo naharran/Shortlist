@@ -8,6 +8,7 @@ services:
       - .env.backend
     volumes:
       - ./backend:/var/www
+      - ./.env.backend:/var/www/.env
       - /var/www/vendor
 
   frontend-applicant:
