@@ -1,9 +1,29 @@
 <script setup lang="ts">
-import { h, onMounted, ref } from 'vue'
+import { h, ref, watch } from 'vue'
 import { NTag } from 'naive-ui'
+import { useAuth0 } from '@auth0/auth0-vue'
 import type { Application, ApplicationSummary, Skill } from '@shared/types'
 
 const apiUrl = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
+const { getAccessTokenSilently, isAuthenticated, isLoading: authLoading } = useAuth0()
+
+async function authFetch(url: string, options: RequestInit = {}): Promise<Response> {
+  const token = await getAccessTokenSilently()
+
+  if (!token) {
+    throw new Error('No access token available. Log out and log back in.')
+  }
+
+  return fetch(url, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+      Authorization: `Bearer ${token}`,
+      ...(options.headers ?? {}),
+    },
+  })
+}
 
 type TabStatus = 'pending' | 'shortlisted' | 'rejected'
 
@@ -64,11 +84,11 @@ async function openDetail(id: number) {
   selectedApplication.value = null
 
   try {
-    const response = await fetch(`${apiUrl}/api/applications/${id}`)
+    const response = await authFetch(`${apiUrl}/api/applications/${id}`)
     if (!response.ok) throw new Error('Failed to load application')
     selectedApplication.value = await response.json()
-  } catch {
-    errorMessage.value = 'Could not load application details.'
+  } catch (err) {
+    errorMessage.value = err instanceof Error ? err.message : 'Could not load application details.'
     drawerOpen.value = false
   } finally {
     detailLoading.value = false
@@ -82,14 +102,10 @@ async function submitReview(status: 'shortlisted' | 'rejected') {
   reviewError.value = null
 
   try {
-    const response = await fetch(
+    const response = await authFetch(
       `${apiUrl}/api/applications/${selectedApplication.value.id}/review`,
       {
         method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-        },
         body: JSON.stringify({
           status,
           review_note: reviewNote.value || null,
@@ -127,11 +143,11 @@ async function loadApplications(status: TabStatus) {
   errorMessage.value = null
 
   try {
-    const response = await fetch(`${apiUrl}/api/applications?status=${status}`)
+    const response = await authFetch(`${apiUrl}/api/applications?status=${status}`)
     if (!response.ok) throw new Error('Failed to load applications')
     applications.value = await response.json()
-  } catch {
-    errorMessage.value = `Could not load ${status} applications.`
+  } catch (err) {
+    errorMessage.value = err instanceof Error ? err.message : `Could not load ${status} applications.`
   } finally {
     loading.value = false
   }
@@ -142,17 +158,29 @@ async function switchTab(tab: TabStatus) {
   await loadApplications(tab)
 }
 
-onMounted(async () => {
+let initialized = false
+
+async function loadInitialData() {
   try {
     const skillsRes = await fetch(`${apiUrl}/api/skills`)
     if (!skillsRes.ok) throw new Error('Failed to load skills')
     skills.value = await skillsRes.json()
     await loadApplications('pending')
-  } catch {
-    errorMessage.value = 'Could not load applications.'
+  } catch (err) {
+    errorMessage.value = err instanceof Error ? err.message : 'Could not load applications.'
     loading.value = false
   }
-})
+}
+
+watch(
+  () => authLoading.value || !isAuthenticated.value,
+  (blocked) => {
+    if (blocked || initialized) return
+    initialized = true
+    loadInitialData()
+  },
+  { immediate: true },
+)
 </script>
 
 <template>
