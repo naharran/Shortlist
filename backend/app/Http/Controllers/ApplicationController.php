@@ -14,7 +14,14 @@ class ApplicationController extends Controller
     public function index(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'status' => ['sometimes', Rule::in(['pending', 'shortlisted', 'rejected'])],
+            'status'         => ['sometimes', Rule::in(['pending', 'shortlisted', 'rejected'])],
+            'search'         => ['sometimes', 'string', 'max:200'],
+            'min_experience' => ['sometimes', 'integer', 'min:0'],
+            'max_experience' => ['sometimes', 'integer', 'min:0'],
+            'min_risk'       => ['sometimes', 'integer', 'min:0', 'max:100'],
+            'max_risk'       => ['sometimes', 'integer', 'min:0', 'max:100'],
+            'skill_ids'      => ['sometimes', 'array'],
+            'skill_ids.*'    => ['integer'],
         ]);
 
         $query = Application::query()
@@ -33,6 +40,39 @@ class ApplicationController extends Controller
 
         if (isset($validated['status'])) {
             $query->where('status', $validated['status']);
+        }
+
+        if (! empty($validated['search'])) {
+            $term = $validated['search'];
+            $matchingIds = \DB::table('applications_fts')
+                ->whereRaw('applications_fts MATCH ?', ["\"{$term}\"*"])
+                ->pluck('rowid');
+            $query->whereIn('id', $matchingIds);
+        }
+
+        if (isset($validated['min_experience'])) {
+            $query->where('overall_experience', '>=', $validated['min_experience']);
+        }
+
+        if (isset($validated['max_experience'])) {
+            $query->where('overall_experience', '<=', $validated['max_experience']);
+        }
+
+        if (isset($validated['min_risk'])) {
+            $query->where('risk_score', '>=', $validated['min_risk']);
+        }
+
+        if (isset($validated['max_risk'])) {
+            $query->where('risk_score', '<=', $validated['max_risk']);
+        }
+
+        if (! empty($validated['skill_ids'])) {
+            foreach ($validated['skill_ids'] as $skillId) {
+                $query->where(function ($q) use ($skillId) {
+                    $q->whereJsonContains('top_skills', $skillId)
+                      ->orWhereJsonContains('moderate_skills', $skillId);
+                });
+            }
         }
 
         return response()->json($query->get());

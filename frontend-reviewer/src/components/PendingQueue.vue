@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { h, ref, watch } from 'vue'
+import { computed, h, ref, watch } from 'vue'
 import { NTag } from 'naive-ui'
 import { useAuth0 } from '@auth0/auth0-vue'
 import type { Application, ApplicationSummary, Skill } from '@shared/types'
@@ -40,6 +40,28 @@ const reviewing = ref(false)
 const reviewNote = ref('')
 const reviewError = ref<string | null>(null)
 const selectedApplication = ref<Application | null>(null)
+
+const search = ref('')
+const minExperience = ref<number | null>(null)
+const maxExperience = ref<number | null>(null)
+const minRisk = ref<number | null>(null)
+const maxRisk = ref<number | null>(null)
+const filterSkillIds = ref<number[]>([])
+const filtersExpanded = ref(false)
+
+const skillOptions = computed(() =>
+  skills.value.map((s) => ({ label: s.name, value: s.id })),
+)
+
+const hasActiveFilters = computed(
+  () =>
+    search.value.trim() !== ''
+    || minExperience.value !== null
+    || maxExperience.value !== null
+    || minRisk.value !== null
+    || maxRisk.value !== null
+    || filterSkillIds.value.length > 0,
+)
 
 const columns = [
   { title: 'Name', key: 'name' },
@@ -132,12 +154,26 @@ const emptyMessages: Record<TabStatus, string> = {
   rejected: 'No rejected applications.',
 }
 
+function buildApplicationsUrl(status: TabStatus): string {
+  const params = new URLSearchParams({ status })
+
+  const term = search.value.trim()
+  if (term) params.set('search', term)
+  if (minExperience.value !== null) params.set('min_experience', String(minExperience.value))
+  if (maxExperience.value !== null) params.set('max_experience', String(maxExperience.value))
+  if (minRisk.value !== null) params.set('min_risk', String(minRisk.value))
+  if (maxRisk.value !== null) params.set('max_risk', String(maxRisk.value))
+  filterSkillIds.value.forEach((id) => params.append('skill_ids[]', String(id)))
+
+  return `${apiUrl}/api/applications?${params}`
+}
+
 async function loadApplications(status: TabStatus) {
   loading.value = true
   errorMessage.value = null
 
   try {
-    const response = await authFetch(`${apiUrl}/api/applications?status=${status}`)
+    const response = await authFetch(buildApplicationsUrl(status))
     if (!response.ok) throw new Error('Failed to load applications')
     applications.value = await response.json()
   } catch (err) {
@@ -145,6 +181,16 @@ async function loadApplications(status: TabStatus) {
   } finally {
     loading.value = false
   }
+}
+
+function clearFilters() {
+  search.value = ''
+  minExperience.value = null
+  maxExperience.value = null
+  minRisk.value = null
+  maxRisk.value = null
+  filterSkillIds.value = []
+  loadApplications(activeTab.value)
 }
 
 async function switchTab(tab: TabStatus) {
@@ -166,6 +212,12 @@ async function loadInitialData() {
   }
 }
 
+watch(search, (value, previous) => {
+  if (previous !== undefined && value === '' && previous !== '') {
+    loadApplications(activeTab.value)
+  }
+})
+
 watch(
   () => authLoading.value || !isAuthenticated.value,
   (blocked) => {
@@ -186,6 +238,61 @@ watch(
         <n-tab-pane name="rejected" tab="Rejected" />
       </n-tabs>
 
+      <div class="filters">
+        <n-input
+          v-model:value="search"
+          class="search-input"
+          placeholder="Search name, email, position, cover letter…"
+          clearable
+          @keyup.enter="loadApplications(activeTab)"
+        />
+
+        <n-button type="primary" @click="loadApplications(activeTab)">Search</n-button>
+
+        <n-button text @click="filtersExpanded = !filtersExpanded">
+          {{ filtersExpanded ? 'Hide filters' : 'Show filters' }}
+          <span v-if="hasActiveFilters && !filtersExpanded" class="filter-dot">●</span>
+        </n-button>
+      </div>
+
+      <div v-if="filtersExpanded" class="filter-panel">
+        <div class="filter-row">
+          <label>Experience (years)</label>
+          <n-input-number v-model:value="minExperience" :min="0" placeholder="Min" size="small" />
+          <span>–</span>
+          <n-input-number v-model:value="maxExperience" :min="0" placeholder="Max" size="small" />
+        </div>
+
+        <div class="filter-row">
+          <label>Risk score</label>
+          <n-input-number v-model:value="minRisk" :min="0" :max="100" placeholder="Min" size="small" />
+          <span>–</span>
+          <n-input-number v-model:value="maxRisk" :min="0" :max="100" placeholder="Max" size="small" />
+        </div>
+
+        <div class="filter-row">
+          <label>Skills</label>
+          <n-select
+            v-model:value="filterSkillIds"
+            :options="skillOptions"
+            multiple
+            filterable
+            placeholder="Any skill"
+            size="small"
+            style="flex: 1"
+          />
+        </div>
+
+        <n-space>
+          <n-button type="primary" size="small" @click="loadApplications(activeTab)">
+            Apply filters
+          </n-button>
+          <n-button size="small" :disabled="!hasActiveFilters" @click="clearFilters">
+            Clear
+          </n-button>
+        </n-space>
+      </div>
+
       <n-alert v-if="errorMessage" type="error" :title="errorMessage" style="margin: 16px 0" />
 
       <n-spin :show="loading">
@@ -200,7 +307,7 @@ watch(
           })"
         />
         <p v-if="!loading && !errorMessage && applications.length === 0" class="empty">
-          {{ emptyMessages[activeTab] }}
+          {{ hasActiveFilters ? 'No applications match your search or filters.' : emptyMessages[activeTab] }}
         </p>
       </n-spin>
     </n-card>
@@ -229,5 +336,48 @@ watch(
   text-align: center;
   color: #666;
   margin-top: 24px;
+}
+
+.filters {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 16px 0 8px;
+}
+
+.search-input {
+  flex: 1;
+}
+
+.filter-dot {
+  color: #2080f0;
+  margin-left: 4px;
+}
+
+.filter-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  margin-bottom: 8px;
+  background: #fafafa;
+  border-radius: 6px;
+}
+
+.filter-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.filter-row label {
+  width: 130px;
+  font-size: 13px;
+  color: #555;
+  flex-shrink: 0;
+}
+
+.filter-row .n-input-number {
+  width: 90px;
 }
 </style>
