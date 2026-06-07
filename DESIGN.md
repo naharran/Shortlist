@@ -31,6 +31,14 @@ table in use — identity comes from Auth0 on the client, and the backend only v
 token. In further development, I would introduce a local reviewer model and table to manage who can
 review, assign roles, and tie each shortlist/reject decision to a specific reviewer record.
 
+**Two-tier rate limiting on application submit .** Submission is limited to 5 successful
+saves per IP per minute, applied *after* validation so form errors (422) do not consume the quota.
+That fixes a UX problem — users fixing validation mistakes should not hit "too many attempts" — but
+it leaves a gap: invalid requests can still be spammed to keep PHP busy (routing, validation, DB
+`exists` checks) without ever saving an application. In production I would add a second, coarser
+route-level limit on all `POST /api/applications` attempts (e.g. 30/min per IP) alongside the
+strict success limit, plus CAPTCHA or CDN/WAF for volumetric abuse.
+
 ---
 
 ## Data Model
@@ -194,3 +202,43 @@ Require a valid Auth0 Bearer token in the `Authorization` header.
 - **Review Drawer:** full application details, Risk Score, flags, suggested action,
   Approve (Shortlist) / Reject buttons
 - Separate tabs: **Pending**, **Shortlisted**, **Rejected**
+
+---
+
+## Tests
+
+Tests focus on what must not break: reviewer access, scoring logic, the application API contract,
+and the error messages candidates actually see.
+
+### Auth0 protection (`Auth0ApiTest`)
+
+Reviewer data stays behind Auth0 — tests walk the full gate from no token → fake JWT → real token.
+
+- `test_protected_routes_reject_requests_without_token` / `…_invalid_jwt` — always run; expect 401.
+- `test_protected_routes_accept_valid_auth0_token` — logs into Auth0 for a real Bearer token and hits a protected route; skipped without `TEST_REVIEWER_*` credentials or Password grant.
+
+### Heuristic engine (`HeuristicServiceTest`)
+
+Unit tests for `HeuristicService` — the product's core value. Grouped around skill over-claiming
+(`test_top_skills_over_experience_cap_raises_flag`, `test_too_many_broad_skills_raises_flag`),
+cover letter signals (`test_poor_cover_letter_coverage_raises_flag`, `test_very_short_cover_letter_raises_flag`),
+and composite outcomes (`test_clean_candidate_has_low_score_and_no_flags` vs `test_risky_candidate_accumulates_high_score`).
+
+### Application API (`ApplicationApiTest`)
+
+Feature tests for the HTTP layer: public submit validates input (`test_store_rejects_invalid_email`),
+persists heuristics on success (`test_store_creates_application_with_heuristic_results`),
+rate-limits successful saves without punishing form errors (`test_store_returns_429_…`, `test_store_validation_failures_do_not_count_…`),
+and reviewer flows — filtered queue, detail vs summary shapes, shortlist/reject, and guarding already-reviewed apps.
+
+### Applicant E2E (`frontend-applicant/e2e`)
+
+Playwright runs against the live form to confirm 422 responses surface in the UI alert — empty submit,
+bad email, and missing required fields (`applicant-form.spec.ts`).
+
+### Running tests
+
+```bash
+docker exec shortlist-backend-1 php artisan test
+cd frontend-applicant && npm run test:e2e   # requires Docker stack running
+```

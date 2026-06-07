@@ -6,6 +6,7 @@ use App\Http\Middleware\Auth0Middleware;
 use App\Models\Application;
 use App\Models\Skill;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\RateLimiter;
 use Tests\TestCase;
 
 class ApplicationApiTest extends TestCase
@@ -93,6 +94,34 @@ class ApplicationApiTest extends TestCase
 
         $response->assertUnprocessable()
             ->assertJsonValidationErrors(['top_skills.0']);
+    }
+
+    public function test_store_validation_failures_do_not_count_toward_rate_limit(): void
+    {
+        RateLimiter::clear('application-submit:127.0.0.1');
+
+        for ($i = 0; $i < 10; $i++) {
+            $this->postJson('/api/applications', $this->validPayload([
+                'cover_letter' => '',
+            ]))->assertUnprocessable();
+        }
+
+        $this->postJson('/api/applications', $this->validPayload())->assertCreated();
+    }
+
+    public function test_store_returns_429_after_five_submissions_per_minute(): void
+    {
+        RateLimiter::clear('application-submit:127.0.0.1');
+
+        for ($i = 0; $i < 5; $i++) {
+            $this->postJson('/api/applications', $this->validPayload([
+                'email' => "applicant{$i}@example.com",
+            ]))->assertCreated();
+        }
+
+        $this->postJson('/api/applications', $this->validPayload([
+            'email' => 'applicant6@example.com',
+        ]))->assertTooManyRequests();
     }
 
     // ─── GET /api/applications ──────────────────────────────────────────────

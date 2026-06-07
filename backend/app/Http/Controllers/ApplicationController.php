@@ -7,6 +7,7 @@ use App\Models\Skill;
 use App\Services\HeuristicService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Validation\Rule;
 
 class ApplicationController extends Controller
@@ -118,6 +119,11 @@ class ApplicationController extends Controller
             'cover_letter'       => ['required', 'string'],
         ]);
 
+        $rateLimitKey = 'application-submit:'.$request->ip();
+        if (RateLimiter::tooManyAttempts($rateLimitKey, 5)) {
+            return response()->json(['message' => 'Too Many Attempts.'], 429);
+        }
+
         $topSkillIds      = $validated['top_skills'];
         $moderateSkillIds = $validated['moderate_skills'] ?? [];
         $validated['moderate_skills'] = $moderateSkillIds;
@@ -140,6 +146,8 @@ class ApplicationController extends Controller
         $application->risk_score      = $analysis['risk_score'];
         $application->heuristic_flags = $analysis['heuristic_flags'];
         $application->save();
+
+        RateLimiter::hit($rateLimitKey, 60);
 
         return response()->json($application, 201);
     }

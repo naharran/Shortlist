@@ -56,9 +56,12 @@ async function submit() {
 
     if (!response.ok) {
       const data = await response.json()
-      if (response.status === 422 && data.errors) {
-        const messages = Object.values(data.errors).flat().join(' ')
-        errorMessage.value = messages
+      if (response.status === 422) {
+        errorMessage.value = data.errors
+          ? Object.values(data.errors).flat().join(' ')
+          : (data.message ?? 'Please check your input and try again.')
+      } else if (response.status === 429) {
+        errorMessage.value = 'Too many submission attempts. Please wait a minute and try again.'
       } else {
         errorMessage.value = data.message ?? 'Submission failed. Please try again.'
       }
